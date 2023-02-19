@@ -22,7 +22,10 @@
 #include "filter_resample.h"
 #include "board.h"
 
+#include "equalizer.h"
+
 static const char *TAG = "PLAY_MP3_FLASH";
+u_int16_t m_lastSample[1024];
 /*
    To embed it in the app binary, the mp3 file is named
    in the component.mk COMPONENT_EMBED_TXTFILES variable.
@@ -44,6 +47,31 @@ int mp3_music_read_cb(audio_element_handle_t el, char *buf, int len, TickType_t 
     return read_size;
 }
 
+typedef enum { LEFTCHANNEL=0, RIGHTCHANNEL=1 } SampleIndex;
+
+int16_t Gain(int16_t s) {
+    int8_t m_vol = 2;
+    int32_t v = 0;
+    v= (s * m_vol)>>6;
+    return (int16_t)(v & 0xffff);
+}
+
+int mp3_music_volume(audio_element_handle_t el, char *buf, int len, TickType_t wait_time, void *ctx)
+{
+    size_t  bytes_written = 0;
+    uint16_t test = 0;
+    memset(m_lastSample, 0, len);
+
+    ESP_LOGW(TAG, "Buffer size %u", len );
+    for(size_t i = 1; i < len; i+=2 ){
+        test = (buf[i] << 8) + buf[i + 1];
+        m_lastSample[i/2] = Gain(test);
+    }
+    i2s_write(0, m_lastSample, len, &bytes_written, portMAX_DELAY);  
+
+	return bytes_written;
+}
+
 void app_main(void)
 {
     audio_pipeline_handle_t pipeline;
@@ -53,9 +81,6 @@ void app_main(void)
     ESP_LOGI(TAG, "[ 1 ] Start audio codec chip");
     audio_board_handle_t board_handle = audio_board_init();
     audio_hal_ctrl_codec(board_handle->audio_hal, AUDIO_HAL_CODEC_MODE_BOTH, AUDIO_HAL_CTRL_START);
-
-    int player_volume;
-    audio_hal_get_volume(board_handle->audio_hal, &player_volume);
 
     ESP_LOGI(TAG, "[ 2 ] Create audio pipeline, add all elements to pipeline, and subscribe pipeline event");
     audio_pipeline_cfg_t pipeline_cfg = DEFAULT_AUDIO_PIPELINE_CONFIG();
@@ -70,8 +95,14 @@ void app_main(void)
     ESP_LOGI(TAG, "[2.2] Create i2s stream to write data to codec chip");
     i2s_stream_cfg_t i2s_cfg = I2S_STREAM_CFG_DEFAULT();
     i2s_cfg.type = AUDIO_STREAM_WRITER;
-    i2s_cfg.i2s_config.sample_rate = 48000;
+    i2s_cfg.i2s_config.sample_rate = 16000; // 48000
+    i2s_cfg.i2s_config.communication_format = (i2s_comm_format_t)(I2S_COMM_FORMAT_STAND_I2S | I2S_COMM_FORMAT_I2S_MSB);
+    i2s_cfg.i2s_config.intr_alloc_flags = ESP_INTR_FLAG_LEVEL1;
+    i2s_cfg.i2s_config.dma_buf_len = 300; //1024
+    
+    //i2s_cfg.i2s_config.fixed_mclk=-1;
     i2s_stream_writer = i2s_stream_init(&i2s_cfg);
+    audio_element_set_write_cb(i2s_stream_writer, mp3_music_volume, NULL);
 
     ESP_LOGI(TAG, "[2.3] Register all elements to audio pipeline");
     audio_pipeline_register(pipeline, mp3_decoder, "mp3");
@@ -93,7 +124,7 @@ void app_main(void)
     const char *link_tag[3] = {"mp3", "filter", "i2s"};
     audio_pipeline_link(pipeline, &link_tag[0], 3);
 #else
-    const char *link_tag[2] = {"mp3", "i2s"};
+    const char *link_tag[3] = {"mp3", "i2s"};
     audio_pipeline_link(pipeline, &link_tag[0], 2);
 #endif
     ESP_LOGI(TAG, "[ 3 ] Set up  event listener");
@@ -106,9 +137,6 @@ void app_main(void)
     ESP_LOGI(TAG, "[ 4 ] Start audio_pipeline");
     audio_pipeline_run(pipeline);
 
-    player_volume = 80;
-    audio_hal_set_volume(board_handle->audio_hal, player_volume);
-    ESP_LOGI(TAG, "[ * ] Volume set to %d %%", player_volume);
     while (1) {
         audio_event_iface_msg_t msg;
         esp_err_t ret = audio_event_iface_listen(evt, &msg, portMAX_DELAY);
@@ -117,7 +145,8 @@ void app_main(void)
             continue;
         }
 
-        if (msg.source_type == AUDIO_ELEMENT_TYPE_ELEMENT && msg.source == (void *) mp3_decoder
+        if (msg.source_type == AUDIO_ELEMENT_TYPE_ELEMENT 
+            && msg.source == (void *) mp3_decoder
             && msg.cmd == AEL_MSG_CMD_REPORT_MUSIC_INFO) {
             audio_element_info_t music_info = {0};
             audio_element_getinfo(mp3_decoder, &music_info);

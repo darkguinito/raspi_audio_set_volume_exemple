@@ -31,8 +31,7 @@
 
 static const char *TAG = "MY_BOARD_V1_0";
 
-esp_err_t get_i2c_pins(i2c_port_t port, i2c_config_t *i2c_config)
-{
+esp_err_t get_i2c_pins(i2c_port_t port, i2c_config_t *i2c_config) {
     AUDIO_NULL_CHECK(TAG, i2c_config, return ESP_FAIL);
     if (port == I2C_NUM_0 || port == I2C_NUM_1) {
         i2c_config->sda_io_num = GPIO_NUM_21;
@@ -46,8 +45,7 @@ esp_err_t get_i2c_pins(i2c_port_t port, i2c_config_t *i2c_config)
     return ESP_OK;
 }
 
-esp_err_t get_i2s_pins(i2s_port_t port, i2s_pin_config_t *i2s_config)
-{
+esp_err_t get_i2s_pins(i2s_port_t port, i2s_pin_config_t *i2s_config) {
     AUDIO_NULL_CHECK(TAG, i2s_config, return ESP_FAIL);
     if (port == I2S_NUM_0) {
         i2s_config->bck_io_num = GPIO_NUM_5;
@@ -64,12 +62,10 @@ esp_err_t get_i2s_pins(i2s_port_t port, i2s_pin_config_t *i2s_config)
         ESP_LOGE(TAG, "i2s port %d is not supported", port);
         return ESP_FAIL;
     }
-
     return ESP_OK;
 }
 
-esp_err_t get_spi_pins(spi_bus_config_t *spi_config, spi_device_interface_config_t *spi_device_interface_config)
-{
+esp_err_t get_spi_pins(spi_bus_config_t *spi_config, spi_device_interface_config_t *spi_device_interface_config) {
     AUDIO_NULL_CHECK(TAG, spi_config, return ESP_FAIL);
     AUDIO_NULL_CHECK(TAG, spi_device_interface_config, return ESP_FAIL);
 
@@ -85,8 +81,7 @@ esp_err_t get_spi_pins(spi_bus_config_t *spi_config, spi_device_interface_config
     return ESP_OK;
 }
 
-esp_err_t i2s_mclk_gpio_select(i2s_port_t i2s_num, gpio_num_t gpio_num)
-{
+esp_err_t i2s_mclk_gpio_select(i2s_port_t i2s_num, gpio_num_t gpio_num) {
     if (i2s_num >= I2S_NUM_MAX) {
         ESP_LOGE(TAG, "Does not support i2s number(%d)", i2s_num);
         return ESP_ERR_INVALID_ARG;
@@ -122,29 +117,22 @@ esp_err_t i2s_mclk_gpio_select(i2s_port_t i2s_num, gpio_num_t gpio_num)
     return ESP_OK;
 }
 
-// sdcard
-
-int8_t get_sdcard_intr_gpio(void)
-{
+int8_t get_sdcard_intr_gpio(void) {
     return SDCARD_INTR_GPIO;
 }
 
-int8_t get_sdcard_open_file_num_max(void)
-{
+int8_t get_sdcard_open_file_num_max(void) {
     return SDCARD_OPEN_FILE_NUM_MAX;
 }
 
-int8_t get_input_volup_id(void)
-{
+int8_t get_input_volup_id(void) {
     return BUTTON_VOLUP_ID;
 }
 
-int8_t get_input_voldown_id(void)
-{
+int8_t get_input_voldown_id(void) {
     return BUTTON_VOLDOWN_ID;
 }
 
-int8_t get_pa_enable_gpio(void)
-{
+int8_t get_pa_enable_gpio(void) {
     return PA_ENABLE_GPIO;
 }

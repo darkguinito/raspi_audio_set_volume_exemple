@@ -47,25 +47,24 @@ int mp3_music_read_cb(audio_element_handle_t el, char *buf, int len, TickType_t 
     return read_size;
 }
 
-typedef enum { LEFTCHANNEL=0, RIGHTCHANNEL=1 } SampleIndex;
-
-int16_t Gain(int16_t s) {
-    int8_t m_vol = 2;
+int16_t Gain(int16_t s, int vol) {
     int32_t v = 0;
-    v= (s * m_vol)>>6;
+    v= (s * vol) >> 6;
     return (int16_t)(v & 0xffff);
 }
 
 int mp3_music_volume(audio_element_handle_t el, char *buf, int len, TickType_t wait_time, void *ctx)
 {
-    size_t  bytes_written = 0;
+    size_t bytes_written = 0;
     uint16_t test = 0;
+    int vol = 0; 
+    audio_board_handle_t board_handle = (audio_board_handle_t)ctx;
+    audio_hal_get_volume(board_handle->audio_hal, &vol);
     memset(m_lastSample, 0, len);
-
-    ESP_LOGW(TAG, "Buffer size %u", len );
+   
     for(size_t i = 1; i < len; i+=2 ){
         test = (buf[i] << 8) + buf[i + 1];
-        m_lastSample[i/2] = Gain(test);
+        m_lastSample[i/2] = Gain(test, vol);
     }
     i2s_write(0, m_lastSample, len, &bytes_written, portMAX_DELAY);  
 
@@ -94,39 +93,18 @@ void app_main(void)
 
     ESP_LOGI(TAG, "[2.2] Create i2s stream to write data to codec chip");
     i2s_stream_cfg_t i2s_cfg = I2S_STREAM_CFG_DEFAULT();
-    i2s_cfg.type = AUDIO_STREAM_WRITER;
-    i2s_cfg.i2s_config.sample_rate = 16000; // 48000
-    i2s_cfg.i2s_config.communication_format = (i2s_comm_format_t)(I2S_COMM_FORMAT_STAND_I2S | I2S_COMM_FORMAT_I2S_MSB);
-    i2s_cfg.i2s_config.intr_alloc_flags = ESP_INTR_FLAG_LEVEL1;
-    i2s_cfg.i2s_config.dma_buf_len = 300; //1024
-    
-    //i2s_cfg.i2s_config.fixed_mclk=-1;
     i2s_stream_writer = i2s_stream_init(&i2s_cfg);
-    audio_element_set_write_cb(i2s_stream_writer, mp3_music_volume, NULL);
+    audio_element_set_write_cb(i2s_stream_writer, mp3_music_volume, (void*)board_handle);
 
     ESP_LOGI(TAG, "[2.3] Register all elements to audio pipeline");
     audio_pipeline_register(pipeline, mp3_decoder, "mp3");
     audio_pipeline_register(pipeline, i2s_stream_writer, "i2s");
-
+    
+    
     ESP_LOGI(TAG, "[2.4] Link it together [mp3_music_read_cb]-->mp3_decoder-->i2s_stream-->[codec_chip]");
-
-    /**Zl38063 does not support 44.1KHZ frequency, so resample needs to be used to convert files to other rates.
-     * You can transfer to 16kHZ or 48kHZ.
-     */
-#if (CONFIG_ESP_LYRATD_MSC_V2_1_BOARD || CONFIG_ESP_LYRATD_MSC_V2_2_BOARD)
-    rsp_filter_cfg_t rsp_cfg = DEFAULT_RESAMPLE_FILTER_CONFIG();
-    rsp_cfg.src_rate = 44100;
-    rsp_cfg.src_ch = 2;
-    rsp_cfg.dest_rate = 48000;
-    rsp_cfg.dest_ch = 2;
-    audio_element_handle_t filter = rsp_filter_init(&rsp_cfg);
-    audio_pipeline_register(pipeline, filter, "filter");
-    const char *link_tag[3] = {"mp3", "filter", "i2s"};
-    audio_pipeline_link(pipeline, &link_tag[0], 3);
-#else
     const char *link_tag[3] = {"mp3", "i2s"};
     audio_pipeline_link(pipeline, &link_tag[0], 2);
-#endif
+
     ESP_LOGI(TAG, "[ 3 ] Set up  event listener");
     audio_event_iface_cfg_t evt_cfg = AUDIO_EVENT_IFACE_DEFAULT_CFG();
     audio_event_iface_handle_t evt = audio_event_iface_init(&evt_cfg);
@@ -136,6 +114,9 @@ void app_main(void)
 
     ESP_LOGI(TAG, "[ 4 ] Start audio_pipeline");
     audio_pipeline_run(pipeline);
+
+
+    audio_hal_set_volume(board_handle->audio_hal, 5);
 
     while (1) {
         audio_event_iface_msg_t msg;
@@ -155,13 +136,6 @@ void app_main(void)
                      music_info.sample_rates, music_info.bits, music_info.channels);
 
             audio_element_setinfo(i2s_stream_writer, &music_info);
-
-            /* Es8388 and es8374 and es8311 use this function to set I2S and codec to the same frequency as the music file, and zl38063
-             * does not need this step because the data has been resampled.*/
-#if (CONFIG_ESP_LYRATD_MSC_V2_1_BOARD || CONFIG_ESP_LYRATD_MSC_V2_2_BOARD)
-#else
-            i2s_stream_set_clk(i2s_stream_writer, music_info.sample_rates , music_info.bits, music_info.channels);
-#endif
             continue;
         }
         /* Stop when the last pipeline element (i2s_stream_writer in this case) receives stop event */
@@ -189,10 +163,6 @@ void app_main(void)
     /* Release all resources */
     audio_pipeline_unregister(pipeline, i2s_stream_writer);
     audio_pipeline_unregister(pipeline, mp3_decoder);
-#if (CONFIG_ESP_LYRATD_MSC_V2_1_BOARD || CONFIG_ESP_LYRATD_MSC_V2_2_BOARD)
-    audio_pipeline_unregister(pipeline, filter);
-    audio_element_deinit(filter);
-#endif
     audio_pipeline_deinit(pipeline);
     audio_element_deinit(i2s_stream_writer);
     audio_element_deinit(mp3_decoder);
